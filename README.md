@@ -1,15 +1,4 @@
-![Starbucks Clone Deployment](https://github.com/user-attachments/assets/6b654f47-9537-4b88-9584-41c760fc49ac)
-
-# Deploy Starbucks Clone Application AWS using DevSecOps Approach
-https://app.eraser.io/workspace/59NJfCay26dUMl5YAlFl?origin=share
-
-# **Install AWS CLI**
-```
-sudo apt install unzip -y
-curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-unzip awscliv2.zip
-sudo ./aws/install
-```
+![Starbucks Clone Deployment](https://github.com/SahilAhire/DevSecOps-Starbucks-Project/blob/main/Finale%20flow%20diagram.png)
  
 # **Install Jenkins on Ubuntu:**
 
@@ -62,18 +51,6 @@ sudo apt-get update
 sudo apt-get install trivy
 ```
 
-
-# **Install Docker Scout:**
-```
-docker login       `Give Dockerhub credentials here`
-```
-```
-curl -sSfL https://raw.githubusercontent.com/docker/scout-cli/main/install.sh | sh -s -- -b /usr/local/bin
-```
-# Deployment Stages:
-<img width="966" alt="Screenshot 2024-09-15 at 7 20 49 AM" src="https://github.com/user-attachments/assets/ddb5e618-79ab-49b3-8f13-b5114824eec3">
-
-
 # Jenkins Complete pipeline
 ```
 pipeline {
@@ -83,106 +60,106 @@ pipeline {
         nodejs 'node16'
     }
     environment {
-        SCANNER_HOME=tool 'sonar-scanner'
+        SCANNER_HOME = tool 'sonar-scanner'
+        DOCKER_REGISTRY = 'atios2309'
+        IMAGE_NAME = 'starbucks'
     }
     stages {
-        stage ("clean workspace") {
+        stage ("Clean Workspace") {
             steps {
                 cleanWs()
             }
         }
-        stage ("Git checkout") {
+        stage ("Git Checkout") {
             steps {
-                git branch: 'main', url: 'https://github.com/yeshwanthlm/starbucks.git'
+                git branch: 'main', url: 'https://github.com/SahilAhire/DevSecOps-Starbucks-Project.git'
             }
         }
-        stage("Sonarqube Analysis "){
-            steps{
+        stage ("SonarQube Analysis") {
+            steps {
                 withSonarQubeEnv('sonar-server') {
-                    sh ''' $SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=starbucks \
-                    -Dsonar.projectKey=starbucks '''
+                    sh '''$SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=starbucks \
+                        -Dsonar.projectKey=starbucks'''
                 }
             }
         }
-        stage("quality gate"){
-           steps {
+        stage ("Quality Gate Check") {
+            steps {
                 script {
-                    waitForQualityGate abortPipeline: false, credentialsId: 'Sonar-token' 
+                    waitForQualityGate abortPipeline: true, credentialsId: 'Sonar-token'
                 }
-            } 
+            }
         }
-        stage("Install NPM Dependencies") {
+        stage ("Install NPM Dependencies") {
             steps {
                 sh "npm install"
             }
         }
-        stage('OWASP FS SCAN') {
+        stage ("Trivy Security Scan") {
             steps {
-                dependencyCheck additionalArguments: '--scan ./ --disableYarnAudit --disableNodeAudit', odcInstallation: 'DP-Check'
-                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
-            }
-        }
-        stage ("Trivy File Scan") {
-            steps {
-                sh "trivy fs . > trivy.txt"
+                sh "trivy fs . > trivy.txt"   // Run Trivy scan and output to file
+                sh "cat trivy.txt"           // Display the results in Jenkins console
             }
         }
         stage ("Build Docker Image") {
             steps {
-                sh "docker build -t starbucks ."
+                sh "docker build -t ${IMAGE_NAME}:latest ."
             }
         }
-        stage ("Tag & Push to DockerHub") {
+        stage ("Push to DockerHub") {
             steps {
                 script {
                     withDockerRegistry(credentialsId: 'docker') {
-                        sh "docker tag starbucks amonkincloud/starbucks:latest "
-                        sh "docker push amonkincloud/starbucks:latest "
+                        sh "docker tag ${IMAGE_NAME}:latest ${DOCKER_REGISTRY}/${IMAGE_NAME}:latest"
+                        sh "docker push ${DOCKER_REGISTRY}/${IMAGE_NAME}:latest"
                     }
                 }
             }
         }
-        stage('Docker Scout Image') {
+        stage ("Deploy to Docker Swarm") {
             steps {
-                script{
-                   withDockerRegistry(credentialsId: 'docker', toolName: 'docker'){
-                       sh 'docker-scout quickview amonkincloud/starbucks:latest'
-                       sh 'docker-scout cves amonkincloud/starbucks:latest'
-                       sh 'docker-scout recommendations amonkincloud/starbucks:latest'
-                   }
-                }
-            }
-        }
-        stage ("Deploy to Conatiner") {
-            steps {
-                sh 'docker run -d --name starbucks -p 3000:3000 amonkincloud/starbucks:latest'
+                sh '''
+                docker swarm init --advertise-addr 10.0.2.15
+                docker service create --name starbucks --replicas 5 \
+                    --publish 3000:3000 \
+                    --restart-condition any \
+                    atios2309/starbucks:latest
+                '''
             }
         }
     }
     post {
-    always {
-        emailext attachLog: true,
-            subject: "'${currentBuild.result}'",
-            body: """
-                <html>
-                <body>
-                    <div style="background-color: #FFA07A; padding: 10px; margin-bottom: 10px;">
-                        <p style="color: white; font-weight: bold;">Project: ${env.JOB_NAME}</p>
-                    </div>
-                    <div style="background-color: #90EE90; padding: 10px; margin-bottom: 10px;">
-                        <p style="color: white; font-weight: bold;">Build Number: ${env.BUILD_NUMBER}</p>
-                    </div>
-                    <div style="background-color: #87CEEB; padding: 10px; margin-bottom: 10px;">
-                        <p style="color: white; font-weight: bold;">URL: ${env.BUILD_URL}</p>
-                    </div>
-                </body>
-                </html>
-            """,
-            to: 'provide_your_Email_id_here',
-            mimeType: 'text/html',
-            attachmentsPattern: 'trivy.txt'
+        always {
+            emailext attachLog: true,
+                subject: "'${currentBuild.result}' - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                body: """
+                    <html>
+                    <body>
+                        <h2 style="color: #4CAF50;">Jenkins Build Report</h2>
+                        <p><strong>Project:</strong> ${env.JOB_NAME}</p>
+                        <p><strong>Build Number:</strong> ${env.BUILD_NUMBER}</p>
+                        <p><strong>URL:</strong> <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
+                    </body>
+                    </html>
+                """,
+                to: 'sahil.ahire2000@gmail.com',
+                mimeType: 'text/html',
+                attachmentsPattern: 'trivy.txt'
         }
     }
 }
 
+
 ```
+
+## Jenkins Pipeline Work Flow
+![Jenkin](https://github.com/hrishi-d-d/Starbucks/blob/main/Screenshot%20(445).png)
+
+
+## SonarQube Analysis Report
+![SonarQube](https://github.com/hrishi-d-d/Starbucks/blob/main/Screenshot%20(444).png)
+
+
+## Starbucks Clone 
+![Jenkin](https://github.com/hrishi-d-d/Starbucks/blob/main/image.png)
+
